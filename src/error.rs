@@ -11,6 +11,8 @@ pub enum Error {
     ///
     /// This should never occur using an original device.
     MissingCharacteristic(Uuid),
+    /// No BLE device matching the given name was found during scan.
+    DeviceNotFound(String),
     /// An error returned by [`btleplug`].
     Btleplug(btleplug::Error),
 }
@@ -21,6 +23,9 @@ impl std::fmt::Display for Error {
             Error::MissingCharacteristic(uuid) => {
                 write!(f, "missing device characteristic '{uuid}'")
             }
+            Error::DeviceNotFound(name) => {
+                write!(f, "no BLE device matching '{name}' found")
+            }
             Error::Btleplug(e) => write!(f, "{e}"),
         }
     }
@@ -29,7 +34,7 @@ impl std::fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Error::MissingCharacteristic(_) => None,
+            Error::MissingCharacteristic(_) | Error::DeviceNotFound(_) => None,
             Error::Btleplug(e) => Some(e),
         }
     }

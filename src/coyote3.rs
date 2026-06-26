@@ -10,7 +10,7 @@ use btleplug::{
 };
 use futures::{FutureExt, StreamExt, future::BoxFuture};
 use smart_default::SmartDefault;
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 use uuid::{Uuid, uuid};
 
 use crate::{
@@ -78,11 +78,23 @@ impl Coyote3 {
 /// Builder type to connect to a Coyote 3.
 ///
 /// This type implements [`IntoFuture`], so you just need to `.await` it to start the connection.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Coyote3Builder {
     adapter: Option<Adapter>,
     peripheral: Option<Peripheral>,
     settings: DeviceSettings,
+    device_name: Option<String>,
+}
+
+impl Default for Coyote3Builder {
+    fn default() -> Self {
+        Self {
+            adapter: None,
+            peripheral: None,
+            settings: DeviceSettings::default(),
+            device_name: Some(DEVICE_NAME.to_string()),
+        }
+    }
 }
 
 impl Coyote3Builder {
@@ -101,7 +113,15 @@ impl Coyote3Builder {
         self.settings = settings;
         self
     }
+    /// Override the BLE device name to scan for (default: "47L121000").
+    pub fn device_name(mut self, name: impl Into<String>) -> Self {
+        self.device_name = Some(name.into());
+        self
+    }
     async fn connect(self) -> Result<Coyote3> {
+        let target_name = self.device_name.as_deref().unwrap_or(DEVICE_NAME);
+        info!("Coyote3 BLE: scanning for device '{}'...", target_name);
+
         let adapter = match self.adapter {
             Some(adapter) => adapter,
             None => {
@@ -120,13 +140,21 @@ impl Coyote3Builder {
                     while let Some(event) = events.next().await {
                         if let CentralEvent::DeviceDiscovered(id) = event {
                             let peripheral = adapter.peripheral(&id).await?;
-                            if peripheral.local_name_matches(DEVICE_NAME).await? {
-                                break 'peripheral peripheral;
+                            let props = peripheral.properties().await?;
+                            if let Some(props) = &props {
+                                if let Some(local_name) = &props.local_name {
+                                    info!("Coyote3 BLE: discovered '{}'", local_name);
+                                    if local_name.as_str() == target_name {
+                                        info!("Coyote3 BLE: matched target '{}'", target_name);
+                                        break 'peripheral peripheral;
+                                    }
+                                }
                             }
                         }
                     }
 
-                    unreachable!()
+                    error!("Coyote3 BLE: no device matching '{}' found during scan", target_name);
+                    return Err(Error::DeviceNotFound(target_name.to_string()));
                 };
 
                 adapter.stop_scan().await?;
